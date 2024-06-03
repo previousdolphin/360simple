@@ -14,11 +14,15 @@ class MyListener:
     def add_service(self, zeroconf, type, name):
         info = zeroconf.get_service_info(type, name)
         if info:
-            address = socket.inet_ntoa(info.address)
+            address = socket.inet_ntoa(info.addresses[0])
             port = info.port
             url = f'http://{address}:{port}/camera/0'
             self.camera_feeds.append(url)
             print(f"Discovered camera feed: {url}")
+
+    def update_service(self, zeroconf, type, name):
+        # Handle service updates if needed
+        pass
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -72,11 +76,21 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.listener.camera_feeds:
             return
 
-        response = requests.get(self.listener.camera_feeds[0], stream=True)
-        if response.status_code == 200:
-            frame = response.raw.read()
-            image = cv2.imdecode(np.frombuffer(frame, np.uint8), cv2.IMREAD_COLOR)
-            self.display_image(image)
+        try:
+            response = requests.get(self.listener.camera_feeds[0], stream=True, timeout=10)
+            bytes_data = bytes()
+            for chunk in response.iter_content(chunk_size=1024):
+                bytes_data += chunk
+                a = bytes_data.find(b'\xff\xd8')
+                b = bytes_data.find(b'\xff\xd9')
+                if a != -1 and b != -1:
+                    jpg = bytes_data[a:b+2]
+                    bytes_data = bytes_data[b+2:]
+                    image = cv2.imdecode(np.frombuffer(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
+                    self.display_image(image)
+                    break
+        except requests.exceptions.RequestException as e:
+            print(f"Error fetching frame: {e}")
 
     def display_image(self, img):
         qformat = QtGui.QImage.Format_RGB888
